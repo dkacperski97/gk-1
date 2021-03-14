@@ -9,15 +9,55 @@
 #include <windows.h>
 
 struct VERTEX {
-    double x, y, z;
+    double values[4];
+    VERTEX(double x, double y, double z, double w = 1.0) {
+        values[0] = x;
+        values[1] = y;
+        values[2] = z;
+        values[3] = w;
+    }
+
+    VERTEX perspective_projection(double z_min)
+    {
+        //if (values[2] < z_min) {
+        //    throw std::exception("Vertex is behind the camera."); // TODO
+        //}
+        return VERTEX(
+            values[0] / values[2],
+            values[1] / values[2],
+            (values[2] - z_min) / (values[2] * (1 - z_min))
+        ); 
+    }
 };
-struct EDGE : std::pair<VERTEX*, VERTEX*> {};
+struct EDGE : std::pair<int, int> {}; // TODO: iterator/pointer?
 struct OBJECT {
     std::vector<VERTEX> vertices;
     std::vector<EDGE> edges;
 };
 struct SCENE {
     std::vector<OBJECT> objects;
+
+    void move_x(double x) {
+        for (int i = 0; i < objects.size(); i++) {
+            for (int j = 0; j < objects[i].vertices.size(); j++) {
+                objects[i].vertices[j].values[0] += x;
+            }
+        }
+    }
+    void move_y(double y) {
+        for (int i = 0; i < objects.size(); i++) {
+            for (int j = 0; j < objects[i].vertices.size(); j++) {
+                objects[i].vertices[j].values[1] += y;
+            }
+        }
+    }
+    void move_z(double z) {
+        for (int i = 0; i < objects.size(); i++) {
+            for (int j = 0; j < objects[i].vertices.size(); j++) {
+                objects[i].vertices[j].values[2] += z;
+            }
+        }
+    }
 };
 
 SCENE scene;
@@ -34,7 +74,35 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
+    case WM_KEYDOWN:
+        //swprintf_s(msg, L"WM_KEYDOWN: 0x%x\n", wParam);
+        //OutputDebugString(msg);
 
+        if (wParam == VK_LEFT) {
+            scene.move_x(0.1);
+            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+        else if (wParam == VK_RIGHT) {
+            scene.move_x(-0.1);
+            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+        else if (wParam == VK_PRIOR) {
+            scene.move_y(0.1);
+            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+        else if (wParam == VK_NEXT) {
+            scene.move_y(-0.1);
+            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+        else if (wParam == VK_UP) {
+            scene.move_z(-0.1);
+            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+        else if (wParam == VK_DOWN) {
+            scene.move_z(0.1);
+            RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+        }
+        break;
     case WM_PAINT:
     {
         hdc = BeginPaint(hwnd, &ps);
@@ -44,11 +112,33 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         //SetMapMode(hdc, MM_ANISOTROPIC);
         //SetWindowExtEx(hdc, rc.right, rc.bottom, NULL);
         //SetViewportExtEx(hdc, rc.right, rc.bottom, NULL);
-        Polyline(hdc, aptStar, 6);
-        MoveToEx(hdc, 0, 20, NULL);
-        LineTo(hdc, width / 2, 20);
-        MoveToEx(hdc, width / 2, 40, NULL);
-        LineTo(hdc, width, 40);
+
+        double z_min = 0.1;
+        std::vector<std::pair<int, int>>vv; // TODO: remove debug info
+        for (auto object : scene.objects) {
+            for (auto edge : object.edges) {
+                VERTEX first = object.vertices[edge.first].perspective_projection(z_min);
+                VERTEX second = object.vertices[edge.second].perspective_projection(z_min);
+
+                int x, y;
+                x = (width / 2) * (first.values[0] + 1); // TODO: aspect ratio
+                y = (height / 2) + ((width / 2) * first.values[1]);
+                MoveToEx(hdc, x, y, NULL);
+                vv.push_back(std::pair<int, int>(x, y));
+                x = (width / 2) * (second.values[0] + 1);
+                y = (height / 2) + ((width / 2) * second.values[1]);
+                LineTo(hdc, x, y);
+                vv.push_back(std::pair<int, int>(x, y));
+                x = vv[0].first;
+            }
+        }
+
+
+        //Polyline(hdc, aptStar, 6);
+        //MoveToEx(hdc, 0, 20, NULL);
+        //LineTo(hdc, width / 2, 20);
+        //MoveToEx(hdc, width / 2, 40, NULL);
+        //LineTo(hdc, width, 40);
         EndPaint(hwnd, &ps);
     }
     return 0;
@@ -66,16 +156,16 @@ SCENE loadScene(std::string path) {
         while (!ifs.eof()) {
             OBJECT object;
             for (int n = 0; n < vertices_number; n++) {
-                VERTEX vertex;
-                ifs >> vertex.x >> vertex.y >> vertex.z;
-                object.vertices.push_back(vertex);
+                double x, y, z;
+                ifs >> x >> y >> z;
+                object.vertices.push_back(VERTEX(x, y, z));
             }
             for (int n = 0; n < edges_number; n++) {
                 EDGE edge;
                 int a, b;
-                ifs >> a >> b;
-                edge.first = &object.vertices[a];
-                edge.second = &object.vertices[b];
+                ifs >> a >> b; 
+                edge.first = a;
+                edge.second = b;
                 object.edges.push_back(edge);
             }
             std::string emptyline;
@@ -97,7 +187,7 @@ int WINAPI wWinMain(
     _In_ int nShowCmd
 )
 {
-    scene = loadScene("input.txt");
+    scene = loadScene("3.txt");
 
     // Register the window class.
     const wchar_t CLASS_NAME[] = L"Main GK Window";
@@ -115,7 +205,7 @@ int WINAPI wWinMain(
     HWND hwnd = CreateWindowEx(
         0,                              // Optional window styles.
         CLASS_NAME,                     // Window class
-        L"Learn to Program Windows",    // Window text
+        L"GK",                          // Window text
         WS_OVERLAPPEDWINDOW,            // Window style
 
         // Size and position
